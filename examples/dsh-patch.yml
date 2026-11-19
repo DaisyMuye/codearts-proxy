@@ -1,0 +1,44 @@
+# DSH 接入示例
+#
+# 放到 ~/.dsh/profiles/<实际profile>/cordis.patch.yml 的顶层数组里。
+# 注意：先用 `powershell -c "Get-CimInstance Win32_Process | ? {$_.CommandLine -like '*dsh*'} | % CommandLine"`
+#      确认实际运行的是哪个 profile（desktop / web），改错了不生效。
+#
+# 原理：llm-pi-ai 在 dsh-base bundle 里已是休眠挂载（id: llm-pi-ai），
+#      这里用相同 id 覆盖它的 config 来注册路由，不要 insert 新实例。
+
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      codearts:
+        displayName: 码道 CodeArts
+        apiKeyEnv: CODEARTS_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:8787/v1
+        defaultContextWindow: 262144
+        defaultMaxTokens: 32768
+        models:
+          - id: deepseek-v4.1-flash-1017
+            name: DeepSeek V4.1 Flash (码道)
+            contextWindow: 262144
+            maxTokens: 32768
+            reasoningEfforts: false
+          # 其余可选模型（按需打开，id 取自 /chat/PromptCenterService/v1/model/builtin）
+          # - id: deepseek-v4.1-flash
+          #   name: DeepSeek V4.1 Flash
+          #   contextWindow: 1048576
+          # - id: glm-5.3-flash
+          #   name: GLM-5.3 Flash
+          #   contextWindow: 1048576
+          # - id: openpangu-2.0-flash
+          #   name: OpenPangu-2.0-Flash
+          #   contextWindow: 524288
+          # - id: kimi-k3
+          #   name: Kimi-K3
+          #   contextWindow: 1048576
+
+# 凭据引用（写入 ~/.dsh/.credentials.yaml 的 refs: 段）
+#
+# refs:
+#   CODEARTS_KEY: sk-local
