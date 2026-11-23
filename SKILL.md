@@ -261,7 +261,103 @@ node probe.mjs        # 能列出模型说明整条链路通了
 
 **跨平台差异**：开机自启只有 Windows 的 vbs 写法，macOS 用 `launchd`、Linux 用 `systemd --user`，但那只是让进程常驻，和反代逻辑无关。
 
-## 十、脚本清单
+## 十、AK-SK 路线（✅ 已打通，首选方案）
+
+**结论：不要再走浏览器桥。用 AK/SK 签名纯 HTTP 反代。**
+
+### 真实接口
+
+```
+POST https://snap-access.cn-north-4.myhuaweicloud.com/api/v2/chat/completions
+```
+
+⚠️ 不是 `/snap-manager/...` —— 那个前缀全是辅助接口，模型推理在 `/api/v2/chat/completions`。
+
+### 签名三个致命细节（踩了两天才试出来）
+
+```python
+canon_uri = u.path if u.path.endswith('/') else u.path + '/'   # ① 路径必须补尾斜杠！
+sdk_date  = now.strftime('%Y%m%dT%H%M%SZ')                     # ② 秒级 UTC，无毫秒
+# ③ STS 只放在 header 里发送，绝不参与签名
+```
+
+`SignedHeaders` 只含 `content-type;host;x-sdk-date`，**STS 不进签名**。我最初把 STS 一起签进去，一直是 `verify ak sk signature fail`。
+
+### 凭据来源（两种都行）
+
+| 类型 | 来源 | STS | 有效期 |
+|---|---|---|---|
+| **永久（推荐）** | 华为云控制台「我的凭证 → 访问密钥」下载 CSV | **不需要** | **永不过期** |
+| 临时 | IDE 的 `state.vscdb` → `huaweicloud.codearts-snap` → `userInfoKey.originData` | 必需 | 约 24h |
+
+**永久 AK 是唯一能做到「不用开 IDE、不用开浏览器」的方案。** 配置里去掉 `security_token` 字段即可。
+
+临时凭据的续期无法绕过：IDE 把 OAuth refresh_token 存在 secretStorage 里，用 AES-GCM 加密，密钥由 IDE 进程持有，外部取不到（试过 DPAPI 解密，blob 结构不是 `v10 + CryptProtectData`，失败）。IDE 开着时每 60 分钟自动续期一次，关掉就停，用满 24h 后失效。
+
+临时凭据格式（`codearts-aksk.json`）：
+
+```json
+{"access_key_id":"HST...","secret_access_key":"...","security_token":"hQpj..."}
+```
+
+永久凭据（去掉第三个字段）：
+
+```json
+{"access_key_id":"AKIDEXAMPLE0000000","secret_access_key":"SKEXAMPLE000000000000000000000000"}
+```
+
+### 现成实现
+
+社区已有多个成品，**不要自己重写**：
+
+| 项目 | 语言 | 说明 |
+|---|---|---|
+| [kdczyz/codearts-proxy-aksk](https://github.com/kdczyz/codearts-proxy-aksk) | Python 单文件 | 只用标准库，含会话配额管理中最细致的实现 |
+| [zhuweiyou/codearts2api](https://github.com/zhuweiyou/codearts2api) | TypeScript | 最多星，多渠道，需 Docker |
+| [fkfbnv/codearts2api-hardened](https://github.com/fkbfnv/codearts2api-hardened) | Go | 上面那个的加固分支 |
+
+### 上游会话限制（比 429 更常见的坑）
+
+```
+每个 AK/SK：最多 3 个存活会话
+会话 = 在途请求 + 响应结束后的约 60 秒残留
+```
+
+所以**同一秒发 3 个短请求就把账号占满**，第 4 个报 `TM.00001041`（HTTP 400）。
+
+这对 agent 场景是硬伤：DSH 一轮任务会发多次请求（主回复 + 标题 + 摘要 + 重试），每次各占一个会话。缓解手段：
+
+- `PROXY_MAX_PER_WINDOW=2` 给别的客户端留一个槽
+- 多账号（每个 AK/SK 独立算 3/60s）
+- **非流式请求不计入会话限制**（实测 6 个并发非流式全 200），所以单文件实现会在无槽时自动降级为非流式再转 SSE
+
+### 本机部署（已就绪）
+
+```
+E:\REA\akproxy\
+├── codearts-proxy-aksk.py    上游实现（我加了 security_token 支持）
+├── sync_cred.py              从 IDE 的 vscdb 提取凭据
+├── run_launch.py             开机启动器（同步凭据 + 拉服务）
+├── codearts-aksk.json        AK/SK/STS（自动生成，勿提交）
+├── snap_models.json          模型清单
+└── start.bat                 手动启动
+```
+
+监听 `http://127.0.0.1:18000/v1`，`Authorization: Bearer sk-local`。
+
+```bash
+python sync_cred.py          # IDE 重新登录后跑一次
+python run_launch.py         # 或 start.bat
+curl http://127.0.0.1:18000/healthz
+```
+
+### 已验证可用的模型
+
+`deepseek-v4.1-flash-1017`、`glm-5.3-flash`、`kimi-k3`、`openpangu-2.0-flash`，全部实测流式输出正常。
+
+⚠️ **非流式响应可能丢正文**：上游对非流式也返回 SSE 且先吐 `reasoning_content`，简单的合并逻辑会丢掉 `content`。客户端一律用 `stream: true`。
+
+## 十一、脚本清单
 
 | 文件 | 用途 |
 |---|---|

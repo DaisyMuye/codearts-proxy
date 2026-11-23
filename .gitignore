@@ -1,8 +1,18 @@
 node_modules/
+__pycache__/
+*.pyc
 *.log
 .DS_Store
 Thumbs.db
+
+# 凭据 —— 绝不提交
+codearts-aksk.json
+*.json.bak
+*.json.tmpbak
+run.env
 .env
 cookies.json
 cookie.txt
-*.bak
+
+# 本地启动器（含绝对路径）
+start.bat

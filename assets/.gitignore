@@ -1,0 +1,15 @@
+# 反代主体（上游：kdczyz/codearts-proxy-aksk，MIT）
+# 本地加了 security_token 支持与多账号
+#
+# ⚠️ 本文件保存的是明文密钥，绝不能提交到任何仓库
+codearts-aksk.json
+*.json.bak
+*.json.tmpbak
+run.env
+# 运行产物
+proxy.log
+sync.log
+__pycache__/
+*.pyc
+# 本地启动器（含绝对路径）
+start.bat
